@@ -147,5 +147,82 @@ net.ipv4.ip_forward = 1
 net.ipv6.config.default.forwarding = 1
 net.ipv6.config.all.forwarding = 1
 ```
-重启生效
+`sudo sysctl -p`或者重启生效
 
+## 配置iptables报文转发
+
+创建WAN口为eno1时的转发，此时WAN一般是DHCP或static IP形式接上层网络。
+
+ `sudo nano /etc/iptables/10-nat.rules`
+
+```
+*nat
+:PREROUTING ACCEPT [0:0]
+:INPUT ACCEPT [0:0]
+:OUTPUT ACCEPT [0:0]
+:POSTROUTING ACCEPT [0:0]
+-A POSTROUTING -o eno1 -j MASQUERADE
+COMMIT
+
+*filter
+:INPUT ACCEPT [0:0]
+:FORWARD ACCEPT [0:0]
+:OUTPUT ACCEPT [0:0]
+-A FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+-A FORWARD -i br0 -o eno1 -j ACCEPT
+COMMIT
+```
+
+创建WAN口为PPPoE时的转发
+
+`sudo nano /etc/iptables/20-nat-pppoe.rules`
+
+```
+*nat
+:PREROUTING ACCEPT [0:0]
+:INPUT ACCEPT [0:0]
+:OUTPUT ACCEPT [0:0]
+:POSTROUTING ACCEPT [0:0]
+-A POSTROUTING -o ppp0 -j MASQUERADE
+COMMIT
+
+*filter
+:INPUT ACCEPT [0:0]
+:FORWARD ACCEPT [0:0]
+:OUTPUT ACCEPT [0:0]
+-A FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+-A FORWARD -i br0 -o ppp0 -j ACCEPT
+COMMIT
+
+*mangle
+:PREROUTING ACCEPT [0:0]
+:INPUT ACCEPT [0:0]
+:FORWARD ACCEPT [0:0]
+:OUTPUT ACCEPT [0:0]
+:POSTROUTING ACCEPT [0:0]
+-A FORWARD -o ppp0 -p tcp -m tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+COMMIT
+```
+
+`sudo nano /etc/network/if-up.d/nat`
+
+```bash
+#!/bin/sh
+if [ "$IFACE" = br0 ]; then
+    iptables-restore /etc/iptables/10-nat.rules
+fi
+if [ "$IFACE" = ppp0 ]; then
+    iptables-restore /etc/iptables/20-nat-pppoe.rules
+fi
+```
+`sudo chmod +x /etc/network/if-up.d/nat`
+
+`sudo nano /etc/network/if-down.d/nat`
+
+```bash
+#!/bin/sh
+if [ "$IFACE" = ppp0 ]; then
+    iptables-restore /etc/iptables/10-nat.rules
+fi
+```
+`sudo chmod +x /etc/network/if-down.d/nat`
